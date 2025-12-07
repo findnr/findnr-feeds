@@ -19,7 +19,7 @@
     *   
 ## 安装说明
 
-- **依赖**：`oath-toolkit-oathtool`、`qrencode` (安装插件时会自动安装)
+- **依赖**：`oath-toolkit`、`qrencode` (安装插件时会自动安装)
 
 ### 方式一：通过 OpenWrt feeds 集成构建
 1. 在 OpenWrt (lede) 源码目录中添加本地 feed（推荐）：
