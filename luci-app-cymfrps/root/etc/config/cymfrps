@@ -1,0 +1,6 @@
+config instance 'example'
+	option enabled '0'
+	option type 'ini'
+	option content '# frps.ini
+[common]
+bind_port = 7000'

@@ -9,6 +9,7 @@
 
 ### ✨ 主要特性
 
+#### luci-app-simple2fa (二次验证)
 *   **安全拦截**：基于 CGI 层的拦截机制，有效防止未授权登录。
 *   **无感植入**：动态替换系统文件，**安装/卸载不残留**，不破坏原有系统文件。
 *   **中文界面**：全中文 UI，操作友好。
@@ -16,7 +17,16 @@
     *   支持 **一键刷新密钥**。
     *   支持 **一键复制密钥**。
     *   支持 **二维码扫描** (Google Authenticator, Authy 等)。
-    *   
+
+#### luci-app-cymfrpc (客户端)
+*   **最新核心**：自动编译最新版 `frpc` (v0.65.0+)。
+*   **多实例管理**：支持同时运行多个 frpc 进程，互不干扰。
+*   **纯文本配置**：所见即所得的配置方式，直接粘贴 `ini/toml/yaml`，支持所有 frp 高级特性。   
+#### luci-app-cymfrps (服务端)
+*   **最新核心**：自动编译最新版 `frps` (v0.65.0+)。
+*   **多实例管理**：支持同时运行多个 frps 服务端进程。
+*   **纯文本配置**：支持 `ini/toml/yaml` 格式。
+
 ## 安装说明
 
 - **依赖**：`oath-toolkit`、`qrencode` (安装插件时会自动安装)
@@ -27,6 +37,10 @@
 echo "src-git findnrfeeds https://github.com/findnr/findnr-feeds.git" >> feeds.conf
 ./scripts/feeds update findnrfeeds
 ./scripts/feeds install luci-app-simple2fa
+./scripts/feeds install luci-app-simple2fa
+./scripts/feeds install cymfrp
+./scripts/feeds install luci-app-cymfrpc
+./scripts/feeds install luci-app-cymfrps
 ```
 
 2. 选择并编译：
@@ -34,6 +48,8 @@ echo "src-git findnrfeeds https://github.com/findnr/findnr-feeds.git" >> feeds.c
 ```bash
 make menuconfig
 # LuCI -> Applications -> luci-app-simple2fa 选为 <*> 或 <M>
+# LuCI -> Applications -> luci-app-cymfrpc 选为 <*> 或 <M>
+# LuCI -> Applications -> luci-app-cymfrps 选为 <*> 或 <M>
 make -j$(nproc)
 ```
 
@@ -43,6 +59,10 @@ make -j$(nproc)
 
 ```bash
 make package/feeds/findnrfeeds/luci-app-simple2fa/compile V=s
+make package/feeds/findnrfeeds/luci-app-simple2fa/compile V=s
+make package/feeds/findnrfeeds/cymfrp/compile V=s
+make package/feeds/findnrfeeds/luci-app-cymfrpc/compile V=s
+make package/feeds/findnrfeeds/luci-app-cymfrps/compile V=s
 ```
 
 2. 将生成的 `.ipk` 拷贝到路由器并安装：

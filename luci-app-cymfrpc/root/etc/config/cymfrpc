@@ -1,0 +1,14 @@
+config instance 'example'
+	option enabled '0'
+	option type 'ini'
+	option content '# Example Configuration
+[common]
+server_addr = 1.2.3.4
+server_port = 7000
+
+[ssh]
+type = tcp
+local_ip = 127.0.0.1
+local_port = 22
+remote_port = 6000
+'
