@@ -2,10 +2,9 @@
 
 ## 简介
 
-这是一个 OpenWrt （lede）的 LuCI 插件 `luci-app-simple2fa`，旨在为路由器登录添加 **TOTP 二次验证 (2FA)** 功能，这样在做内网穿透增加了一层安全防护。
-
-<img width="1553" height="641" alt="image" src="https://github.com/user-attachments/assets/b0a029f8-9863-490b-95a1-59b25892e721" />
-<img width="1036" height="663" alt="image" src="https://github.com/user-attachments/assets/60b42060-d15c-4a10-858e-328db5977a20" />
+- luci-app-simple2fa，旨在为路由器登录添加 **TOTP 二次验证 (2FA)** 功能，这样在做内网穿透增加了一层安全防护。
+- luci-app-cymfrpc (客户端)` , **多实例管理**：支持同时运行多个 frpc 进程，互不干扰。
+- luci-app-cymfrps (服务端)，支持同时运行多个 frps 服务端进程。
 
 ### ✨ 主要特性
 
@@ -17,16 +16,18 @@
     *   支持 **一键刷新密钥**。
     *   支持 **一键复制密钥**。
     *   支持 **二维码扫描** (Google Authenticator, Authy 等)。
+<img width="1036" height="663" alt="image" src="https://github.com/user-attachments/assets/60b42060-d15c-4a10-858e-328db5977a20" />
 
 #### luci-app-cymfrpc (客户端)
 *   **最新核心**：自动编译最新版 `frpc` (v0.65.0+)。
 *   **多实例管理**：支持同时运行多个 frpc 进程，互不干扰。
-*   **纯文本配置**：所见即所得的配置方式，直接粘贴 `ini/toml/yaml`，支持所有 frp 高级特性。   
+*   **纯文本配置**：所见即所得的配置方式，直接粘贴 `ini/toml/yaml`，支持所有 frp 高级特性。
+<img width="980" height="439" alt="image" src="https://github.com/user-attachments/assets/3c498e68-7142-4483-b110-d1667e8a00f0" />
 #### luci-app-cymfrps (服务端)
 *   **最新核心**：自动编译最新版 `frps` (v0.65.0+)。
 *   **多实例管理**：支持同时运行多个 frps 服务端进程。
 *   **纯文本配置**：支持 `ini/toml/yaml` 格式。
-
+<img width="958" height="371" alt="image" src="https://github.com/user-attachments/assets/16c1448b-a6bf-4771-9c98-fcc0b438d604" />
 ## 安装说明
 
 - **依赖**：`oath-toolkit`、`qrencode` (安装插件时会自动安装)
