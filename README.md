@@ -11,6 +11,7 @@
 
 #### luci-app-simple2fa (二次验证)
 *   **安全拦截**：基于 CGI 层的拦截机制，有效防止未授权登录。
+*   **全主题兼容**：通过动态 JS 注入，**支持所有 LuCI 主题**（bootstrap、argon、material 等）。
 *   **无感植入**：动态替换系统文件，**安装/卸载不残留**，不破坏原有系统文件。
 *   **中文界面**：全中文 UI，操作友好。
 *   **便捷管理**：
@@ -108,3 +109,45 @@ ssh root@<router> opkg install /tmp/luci-app-simple2fa_*.ipk
     *   尝试点击“刷新密钥”重新绑定。
 - **卸载后登录页异常**：
     *   插件自带卸载恢复脚本。如果意外残留，请检查 `/www/cgi-bin/luci.bak` 是否存在，手动还原即可。
+
+## 开发说明
+
+### 目录结构
+
+所有 LuCI 包均采用标准 `luci.mk` 结构：
+
+```
+luci-app-xxx/
+├── Makefile          # 使用 luci.mk
+├── luasrc/           # Lua 源码
+│   ├── controller/   # 控制器
+│   ├── model/cbi/    # CBI 模型
+│   └── view/         # 视图模板 (如有)
+├── root/             # 其他文件 (config, init.d 等)
+└── po/               # 翻译文件
+    ├── templates/xxx.pot   # 翻译模板
+    └── zh_Hans/xxx.po      # 简体中文翻译
+```
+
+### i18n 国际化
+
+- 源码使用英文 `translate("English Text")`
+- 中文翻译通过 `po/zh_Hans/*.po` 提供
+- 编译时自动生成 `luci-i18n-xxx-zh-cn` 翻译包
+
+### Makefile 示例
+
+```makefile
+include $(TOPDIR)/rules.mk
+
+LUCI_TITLE:=Your App Title
+LUCI_DEPENDS:=+luci-base +luci-compat
+LUCI_PKGARCH:=all
+
+PKG_VERSION:=1.0.0
+PKG_RELEASE:=1
+
+include $(TOPDIR)/feeds/luci/luci.mk
+
+$(eval $(call BuildPackage,luci-app-xxx))
+```

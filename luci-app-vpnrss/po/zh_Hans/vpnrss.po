@@ -1,0 +1,53 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "VPN RSS"
+msgstr "VPN RSS"
+
+msgid "VPN Subscription Aggregator"
+msgstr "VPN 订阅聚合"
+
+msgid "Manage your VPN nodes and generate subscription links."
+msgstr "管理您的 VPN 节点并生成订阅链接。"
+
+msgid "Global Settings"
+msgstr "全局设置"
+
+msgid "Enable Plugin"
+msgstr "启用插件"
+
+msgid "Security Token"
+msgstr "安全密钥 (Token)"
+
+msgid "Set a token to protect your subscription link from scanning (recommended)."
+msgstr "设置密钥以保护您的订阅链接不被扫描（推荐）。"
+
+msgid "Generate Random Token (UUID)"
+msgstr "🎲 生成随机密钥 (UUID)"
+
+msgid "Node Management"
+msgstr "节点管理"
+
+msgid "Supported protocols: vmess, vless, trojan, ss, hysteria2.<br/>"
+msgstr "支持协议：vmess, vless, trojan, ss, hysteria2。<br/>"
+
+msgid "Batch import: paste multiple links in the link field (comma or newline separated)."
+msgstr "支持批量导入：在链接框中粘贴多条链接（用逗号或换行分隔）。"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Alias"
+msgstr "备注"
+
+msgid "Give the node a name. For batch import:<br/>1. Leave empty: use original node name.<br/>2. Fill in: auto-name as 'Alias 1', 'Alias 2'..."
+msgstr "给节点起个名字。批量导入时：<br/>1. 留空：使用节点原名。<br/>2. 填入：自动命名为 '备注 1', '备注 2'..."
+
+msgid "Link"
+msgstr "链接"
+
+msgid "Paste the full share link. Batch paste supported."
+msgstr "粘贴完整的分享链接。支持批量粘贴。"
+
+msgid "Invalid link format. Must start with vmess://, vless://, trojan://, ss:// or hysteria2://"
+msgstr "链接格式无效。必须以 vmess://, vless://, trojan://, ss:// 或 hysteria2:// 开头"
