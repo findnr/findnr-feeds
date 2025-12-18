@@ -1,0 +1,32 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "CymFrps Server"
+msgstr "CymFrps 服务端"
+
+msgid "Manage multiple FRPS server instances with raw config support."
+msgstr "管理多个 FRPS 服务端实例，支持纯文本配置。"
+
+msgid "Instance List"
+msgstr "实例列表"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Config Format"
+msgstr "配置格式"
+
+msgid "Edit Instance"
+msgstr "编辑实例"
+
+msgid "Configure FRPS server instance details."
+msgstr "配置 FRPS 服务端详情。"
+
+msgid "Config Content"
+msgstr "配置内容"
+
+msgid "Paste raw config content here, make sure the format is correct."
+msgstr "在此粘贴原始配置内容，请确保格式正确。"

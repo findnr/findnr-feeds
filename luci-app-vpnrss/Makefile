@@ -1,35 +1,26 @@
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=luci-app-vpnrss
+LUCI_TITLE:=VPN RSS Subscription Generator
+LUCI_DEPENDS:=+luci-base +luci-compat +luci-lib-jsonc +luci-lib-nixio
+LUCI_PKGARCH:=all
+
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
-PKG_MAINTAINER:=findnr
 
-include $(INCLUDE_DIR)/package.mk
-
-define Package/luci-app-vpnrss
-  SECTION:=luci
-  CATEGORY:=LuCI
-  SUBMENU:=3. Applications
-  TITLE:=VPN RSS Subscription Generator
-  DEPENDS:=+luci-base +luci-lib-jsonc +luci-lib-nixio
-  PKGARCH:=all
-endef
-
-define Package/luci-app-vpnrss/description
-  Aggregate VPN nodes and generate subscriptions for Clash, Sing-box, etc.
-endef
-
-define Build/Compile
-endef
+include $(TOPDIR)/feeds/luci/luci.mk
 
 define Package/luci-app-vpnrss/install
-	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/vpnrss
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/vpnrss
 	$(INSTALL_DIR) $(1)/usr/lib/lua/vpnrss
-
-	$(CP) ./root/* $(1)/
+	$(INSTALL_DIR) $(1)/etc/config
+	
+	$(INSTALL_DATA) ./luasrc/controller/vpnrss.lua $(1)/usr/lib/lua/luci/controller/
+	$(INSTALL_DATA) ./luasrc/model/cbi/vpnrss/*.lua $(1)/usr/lib/lua/luci/model/cbi/vpnrss/
+	$(INSTALL_DATA) ./luasrc/view/vpnrss/*.htm $(1)/usr/lib/lua/luci/view/vpnrss/
+	$(CP) ./root/etc $(1)/
+	$(CP) ./root/usr/lib/lua/vpnrss $(1)/usr/lib/lua/
 endef
 
 $(eval $(call BuildPackage,luci-app-vpnrss))

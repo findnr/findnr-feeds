@@ -1,0 +1,32 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "CymFrps Server"
+msgstr ""
+
+msgid "Manage multiple FRPS server instances with raw config support."
+msgstr ""
+
+msgid "Instance List"
+msgstr ""
+
+msgid "Enable"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Config Format"
+msgstr ""
+
+msgid "Edit Instance"
+msgstr ""
+
+msgid "Configure FRPS server instance details."
+msgstr ""
+
+msgid "Config Content"
+msgstr ""
+
+msgid "Paste raw config content here, make sure the format is correct."
+msgstr ""

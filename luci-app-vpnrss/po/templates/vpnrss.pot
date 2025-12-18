@@ -1,0 +1,53 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "VPN RSS"
+msgstr ""
+
+msgid "VPN Subscription Aggregator"
+msgstr ""
+
+msgid "Manage your VPN nodes and generate subscription links."
+msgstr ""
+
+msgid "Global Settings"
+msgstr ""
+
+msgid "Enable Plugin"
+msgstr ""
+
+msgid "Security Token"
+msgstr ""
+
+msgid "Set a token to protect your subscription link from scanning (recommended)."
+msgstr ""
+
+msgid "Generate Random Token (UUID)"
+msgstr ""
+
+msgid "Node Management"
+msgstr ""
+
+msgid "Supported protocols: vmess, vless, trojan, ss, hysteria2.<br/>"
+msgstr ""
+
+msgid "Batch import: paste multiple links in the link field (comma or newline separated)."
+msgstr ""
+
+msgid "Enable"
+msgstr ""
+
+msgid "Alias"
+msgstr ""
+
+msgid "Give the node a name. For batch import:<br/>1. Leave empty: use original node name.<br/>2. Fill in: auto-name as 'Alias 1', 'Alias 2'..."
+msgstr ""
+
+msgid "Link"
+msgstr ""
+
+msgid "Paste the full share link. Batch paste supported."
+msgstr ""
+
+msgid "Invalid link format. Must start with vmess://, vless://, trojan://, ss:// or hysteria2://"
+msgstr ""

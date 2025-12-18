@@ -1,7 +1,7 @@
 #!/usr/bin/env ucode
 'use strict';
 
-// 引入必要的库，增加了 popen 用于执行系统命令
+// 引入必要的库
 import { stdin, stdout, popen } from 'fs';
 import dispatch from 'luci.dispatcher';
 import request from 'luci.http';
@@ -11,6 +11,8 @@ const input_bufsize = 4096;
 let content_len = +getenv('CONTENT_LENGTH') || 0;
 let buffer = null;
 let buffer_pos = 0;
+let response_buffer = "";
+let is_login_page = false;
 
 // ==========================================================
 // 🛡️ 2FA 拦截核心逻辑 (开始)
@@ -22,18 +24,15 @@ if (getenv('REQUEST_METHOD') == 'POST' && content_len > 0 && content_len < 10240
     buffer = stdin.read(content_len);
     
     // 2. 简单的正则匹配，检查是否是 root 登录
-    // 你的浏览器 payload 是: luci_username=root
     let user_match = match(buffer, /luci_username=([^&]+)/);
     
     if (user_match && user_match[1] == 'root') {
-        // 3. 检查开关状态 (调用 uci 命令)
+        // 3. 检查开关状态
         let p = popen('uci get simple2fa.global.enabled');
         let enabled = p.read('all');
         p.close();
         
-        // 注意：命令输出通常带换行符，需要处理
         if (enabled && replace(enabled, "\n", "") == '1') {
-            
             // 4. 获取密钥
             p = popen('uci get simple2fa.global.secret');
             let secret = p.read('all');
@@ -42,12 +41,11 @@ if (getenv('REQUEST_METHOD') == 'POST' && content_len > 0 && content_len < 10240
             if (secret) {
                 secret = replace(secret, "\n", "");
                 
-                // 5. 从请求体中提取 token (你前端 JS 提交的字段名)
+                // 5. 从请求体中提取 token
                 let token_match = match(buffer, /token=([^&]*)/);
                 let token = token_match ? token_match[1] : "";
                 
                 // 6. 调用 oathtool 计算正确验证码
-                // -b: base32, --totp: 算法, -d 6: 6位
                 p = popen(`oathtool -b --totp -d 6 '${secret}'`);
                 let correct_code = p.read('all');
                 p.close();
@@ -57,7 +55,6 @@ if (getenv('REQUEST_METHOD') == 'POST' && content_len > 0 && content_len < 10240
                     
                     // 7. 最终比对
                     if (token != correct_code) {
-                        // ❌ 验证失败：重定向回登录页并带上错误标记
                         print("Status: 302 Found\r\n");
                         print("Location: /cgi-bin/luci?simple2fa_err=1\r\n\r\n");
                         exit(0);
@@ -67,28 +64,112 @@ if (getenv('REQUEST_METHOD') == 'POST' && content_len > 0 && content_len < 10240
         }
     }
 }
+
+// 检测是否是登录页面请求 (GET 请求且无 stok 参数)
+let query_string = getenv('QUERY_STRING') ?? "";
+let request_uri = getenv('REQUEST_URI') ?? "";
+if (getenv('REQUEST_METHOD') == 'GET' && 
+    (request_uri == '/cgi-bin/luci' || request_uri == '/cgi-bin/luci/' || 
+     index(query_string, 'simple2fa_err') != -1) &&
+    index(query_string, 'stok=') == -1) {
+    is_login_page = true;
+}
+
 // ==========================================================
 // 🛡️ 2FA 拦截核心逻辑 (结束)
 // ==========================================================
 
+// 通用 2FA 输入框注入 JS (适用于所有主题)
+const simple2fa_inject_js = `
+<script>
+(function() {
+    // 等待 DOM 加载完成
+    function injectTokenField() {
+        // 查找密码输入框
+        var passInput = document.querySelector('input[type="password"][name="luci_password"]');
+        if (!passInput) {
+            // 如果还没找到，稍后重试
+            setTimeout(injectTokenField, 100);
+            return;
+        }
+        
+        // 检查是否已经注入过
+        if (document.querySelector('input[name="token"]')) return;
+        
+        // 创建验证码输入框
+        var tokenInput = document.createElement('input');
+        tokenInput.type = 'text';
+        tokenInput.name = 'token';
+        tokenInput.placeholder = '验证码 (未启用留空)';
+        tokenInput.autocomplete = 'off';
+        tokenInput.className = passInput.className;
+        tokenInput.style.cssText = passInput.style.cssText;
+        tokenInput.style.marginTop = '10px';
+        
+        // 找到密码框的父容器并插入
+        var parent = passInput.parentElement;
+        if (parent) {
+            // 尝试找到包含密码框的 div 容器
+            var container = parent;
+            while (container && container.tagName !== 'FORM' && !container.classList.contains('input-container') && !container.classList.contains('cbi-value')) {
+                if (container.nextElementSibling) break;
+                container = container.parentElement;
+            }
+            
+            // 创建一个包装 div
+            var wrapper = document.createElement('div');
+            wrapper.style.marginTop = '10px';
+            wrapper.appendChild(tokenInput);
+            
+            // 插入到密码框容器后面
+            if (parent.nextElementSibling) {
+                parent.parentElement.insertBefore(wrapper, parent.nextElementSibling);
+            } else {
+                parent.parentElement.appendChild(wrapper);
+            }
+        }
+        
+        // 显示错误信息 (如果有)
+        if (window.location.search.indexOf('simple2fa_err=1') !== -1) {
+            var errDiv = document.createElement('div');
+            errDiv.style.cssText = 'color: #d9534f; background: #f2dede; border: 1px solid #ebccd1; padding: 10px; margin-bottom: 15px; border-radius: 4px;';
+            errDiv.innerText = '验证码错误，请重试';
+            
+            var form = document.querySelector('form');
+            if (form) {
+                form.insertBefore(errDiv, form.firstChild);
+            }
+            
+            // 清除 URL 参数
+            if (history.replaceState) {
+                history.replaceState(null, '', window.location.pathname);
+            }
+        }
+    }
+    
+    // 页面加载后执行
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', injectTokenField);
+    } else {
+        injectTokenField();
+    }
+})();
+</script>
+`;
 
-// 重写 read 函数：如果是登录请求，从内存 buffer 读取；否则从 stdin 流读取
+// 重写 read 函数
 function read(len) {
     if (buffer) {
-        // 从内存读取 (针对登录请求)
         if (buffer_pos >= length(buffer)) return null;
-        
         let chunk_len = min(length(buffer) - buffer_pos, len ?? input_bufsize);
         let chunk = substr(buffer, buffer_pos, chunk_len);
         buffer_pos += chunk_len;
         return chunk;
     } else {
-        // 原始流式读取 (针对文件上传等其他请求)
         if (content_len <= 0) {
             stdin.close();
             return null;
         }
-        
         let chunk = stdin.read(min(content_len, len ?? input_bufsize, input_bufsize));
         if (chunk == null) {
             content_len = 0;
@@ -100,7 +181,12 @@ function read(len) {
     }
 }
 
+// 重写 write 函数：如果是登录页面，缓存响应并注入 JS
 function write(data) {
+    if (is_login_page) {
+        response_buffer += data;
+        return length(data);
+    }
     return stdout.write(data);
 }
 
@@ -108,3 +194,18 @@ function write(data) {
 let req = request(getenv(), read, write);
 dispatch(req);
 req.close();
+
+// 如果是登录页面，在 </body> 前注入 JS
+if (is_login_page && length(response_buffer) > 0) {
+    // 在 </body> 或 </html> 前注入
+    let inject_pos = index(response_buffer, '</body>');
+    if (inject_pos == -1) inject_pos = index(response_buffer, '</html>');
+    
+    if (inject_pos != -1) {
+        let output = substr(response_buffer, 0, inject_pos) + simple2fa_inject_js + substr(response_buffer, inject_pos);
+        stdout.write(output);
+    } else {
+        // 没找到合适位置，直接追加
+        stdout.write(response_buffer + simple2fa_inject_js);
+    }
+}

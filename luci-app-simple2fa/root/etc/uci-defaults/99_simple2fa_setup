@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Simple2FA: Setup script
+# This script backs up original CGI luci and replaces it with 2FA version
+# Works with ALL themes - no theme-specific modifications needed
+
+CGI_LUCI="/www/cgi-bin/luci"
+SIMPLE2FA_LUCI="/usr/share/luci-app-simple2fa/luci"
+
+# Backup original luci CGI if not already backed up
+if [ -f "$CGI_LUCI" ] && [ ! -f "${CGI_LUCI}.bak" ]; then
+    cp -f "$CGI_LUCI" "${CGI_LUCI}.bak"
+fi
+
+# Replace with 2FA version
+if [ -f "$SIMPLE2FA_LUCI" ]; then
+    cp -f "$SIMPLE2FA_LUCI" "$CGI_LUCI"
+    chmod +x "$CGI_LUCI"
+fi
+
+exit 0

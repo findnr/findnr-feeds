@@ -1,0 +1,35 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "Two-Factor Auth"
+msgstr "二次验证"
+
+msgid "Two-Factor Authentication"
+msgstr "双因素认证"
+
+msgid "Enable 2FA to protect your router login."
+msgstr "启用二次验证以保护您的路由器登录。"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Enable Two-Factor Auth"
+msgstr "启用二次验证"
+
+msgid "Secret Key"
+msgstr "密钥"
+
+msgid "If you cannot scan the QR code, enter this key manually."
+msgstr "如果无法扫描二维码，请手动输入此密钥。"
+
+msgid "Refresh Secret"
+msgstr "刷新密钥"
+
+msgid "Warning: After refreshing, you must reconfigure all authenticator apps."
+msgstr "警告：刷新密钥后，您必须重新配置所有设备的验证器应用。"
+
+msgid "Scan QR Code"
+msgstr "扫描二维码"
+
+msgid "Use Google Authenticator, Authy or Microsoft Auth to scan this QR code."
+msgstr "请使用 Google Authenticator、Authy 或 Microsoft Auth 扫描此二维码。"
