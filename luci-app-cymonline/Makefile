@@ -12,6 +12,8 @@ include $(TOPDIR)/feeds/luci/luci.mk
 define Package/luci-app-cymonline/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/cymonline
 	$(INSTALL_DIR) $(1)/usr/lib/lua/cymonline
 	$(INSTALL_DIR) $(1)/usr/lib/cymonline
 
