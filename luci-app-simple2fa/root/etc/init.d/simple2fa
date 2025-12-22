@@ -6,23 +6,16 @@ STOP=10
 CGI_LUCI="/www/cgi-bin/luci"
 SIMPLE2FA_LUCI="/usr/share/luci-app-simple2fa/luci"
 
-boot() {
-	# Wait a bit for system to settle
-	sleep 2
-	start
-}
-
 start() {
 	local enabled=$(uci -q get simple2fa.global.enabled)
 	
-	logger -t simple2fa "Service start called, enabled=$enabled"
+	logger -t simple2fa "Start called (config enabled=$enabled)"
 
 	if [ "$enabled" = "1" ]; then
 		# 1. Backup original if not exists
-		if [ -L "$CGI_LUCI" ] || [ -f "$CGI_LUCI" ]; then
-			if [ ! -f "${CGI_LUCI}.bak" ]; then
-				# If it's a symlink, we want to backup the target or just the link?
-				# Usually we want the original binary.
+		if [ -e "$CGI_LUCI" ] && [ ! -e "${CGI_LUCI}.bak" ]; then
+			# Check if it's our own script already (don't backup ourselves)
+			if ! grep -q "Simple2FA" "$CGI_LUCI" 2>/dev/null; then
 				cp -af "$CGI_LUCI" "${CGI_LUCI}.bak"
 				logger -t simple2fa "Backup created: ${CGI_LUCI}.bak"
 			fi
@@ -30,20 +23,16 @@ start() {
 		
 		# 2. Enforce 2FA version
 		if [ -f "$SIMPLE2FA_LUCI" ]; then
-			if ! cmp -s "$SIMPLE2FA_LUCI" "$CGI_LUCI"; then
-				logger -t simple2fa "Replacing $CGI_LUCI with 2FA version"
-				rm -f "$CGI_LUCI"
-				cp -f "$SIMPLE2FA_LUCI" "$CGI_LUCI"
-				chmod +x "$CGI_LUCI"
-				logger -t simple2fa "2FA CGI enforced successfully"
-			else
-				logger -t simple2fa "CGI already up to date"
-			fi
+			logger -t simple2fa "Enforcing 2FA CGI..."
+			rm -f "$CGI_LUCI"
+			cp -f "$SIMPLE2FA_LUCI" "$CGI_LUCI"
+			chmod +x "$CGI_LUCI"
+			logger -t simple2fa "2FA CGI enforced successfully"
 		else
-			logger -t simple2fa "Error: Source $SIMPLE2FA_LUCI not found!"
+			logger -t simple2fa "ERROR: Source $SIMPLE2FA_LUCI missing!"
 		fi
 	else
-		logger -t simple2fa "Service disabled, stopping..."
+		logger -t simple2fa "Service disabled in config, ensuring original CGI..."
 		stop
 	fi
 }
@@ -51,7 +40,7 @@ start() {
 stop() {
 	# Restore original if backup exists
 	if [ -f "${CGI_LUCI}.bak" ]; then
-		logger -t simple2fa "Restoring original CGI from backup"
+		logger -t simple2fa "Restoring original CGI..."
 		rm -f "$CGI_LUCI"
 		cp -af "${CGI_LUCI}.bak" "$CGI_LUCI"
 		chmod +x "$CGI_LUCI"

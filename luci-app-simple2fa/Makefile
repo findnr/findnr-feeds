@@ -23,7 +23,7 @@ define Package/luci-app-simple2fa/install
 	$(INSTALL_DATA) ./luasrc/view/simple2fa/*.htm $(1)/usr/lib/lua/luci/view/simple2fa/
 	$(INSTALL_DATA) ./root/etc/config/simple2fa $(1)/etc/config/simple2fa
 	$(INSTALL_BIN) ./root/etc/init.d/simple2fa $(1)/etc/init.d/
-	$(INSTALL_BIN) ./root/etc/uci-defaults/99_simple2fa_setup $(1)/etc/uci-defaults/
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99_simple2fa_setup $(1)/etc/uci-defaults/99_simple2fa
 	$(INSTALL_BIN) ./root/usr/share/luci-app-simple2fa/luci $(1)/usr/share/luci-app-simple2fa/luci
 endef
 
