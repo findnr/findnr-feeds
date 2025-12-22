@@ -1,2 +1,2 @@
-config simple2fa 'global'
+config settings 'global'
 	option enabled '0'
