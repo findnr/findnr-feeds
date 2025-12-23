@@ -1,78 +1,96 @@
 #!/usr/bin/lua
 --[[
-  Simple2FA Debug Build - CGI Script
-  所有操作都会记录到系统日志，使用 logread | grep simple2fa 查看
-  标记: Simple2FA-Debug (用于识别是否已替换)
+  Simple2FA Debug Build - CGI Script (Fixed Version)
+  
+  关键修复: 不再预先消费 stdin，而是包装 read 函数
+  这样既能检查登录请求，又不会破坏 LuCI 的正常流程
+  
+  标记: Simple2FA-Debug
 ]]--
 
 -- 日志函数
 local function log(msg)
-    os.execute(string.format("logger -t simple2fa '[CGI] %s'", msg:gsub("'", "\\'")))
+    os.execute(string.format("logger -t simple2fa '[CGI] %s'", tostring(msg):gsub("'", "\\'")))
 end
 
-log("========== CGI 被调用 ==========")
+log("========== CGI 启动 ==========")
 
--- 获取环境变量
+-- 加载必要模块
+require "luci.cacheloader"
+local ltn12 = require("luci.ltn12")
+local sys = require("luci.sys")
+local sgi = require("luci.sgi.cgi")
+
+-- 设置索引缓存
+luci.dispatcher.indexcache = "/tmp/luci-indexcache"
+
+-- 获取环境信息
 local method = os.getenv("REQUEST_METHOD") or "UNKNOWN"
 local content_len = tonumber(os.getenv("CONTENT_LENGTH")) or 0
-local uri = os.getenv("REQUEST_URI") or "UNKNOWN"
+local uri = os.getenv("REQUEST_URI") or ""
 
-log(string.format("请求信息: METHOD=%s, CONTENT_LENGTH=%d, URI=%s", method, content_len, uri))
+log(string.format("请求: METHOD=%s, LEN=%d, URI=%s", method, content_len, uri))
 
--- 读取 POST 数据 (如果有)
-local post_data = ""
+-- 只在 POST 登录请求时进行 2FA 检查
+-- 登录请求的特征: POST 到根路径，且包含 luci_username
+local need_2fa_check = false
+local post_buffer = nil
+
 if method == "POST" and content_len > 0 and content_len < 10240 then
-    post_data = io.read(content_len) or ""
-    log(string.format("POST 数据长度: %d 字节", #post_data))
-    
-    -- 解析关键字段 (不记录密码)
-    local username = post_data:match("luci_username=([^&]+)")
-    local has_password = post_data:match("luci_password=") and true or false
-    local totp_code = post_data:match("totp_code=([^&]*)") or ""
-    
-    log(string.format("表单解析: username=%s, has_password=%s, totp_code='%s'", 
-        username or "nil", tostring(has_password), totp_code))
-    
-    -- 检查是否需要 2FA 验证
-    if username == "root" then
-        log("用户 root 登录检测 -> 检查 2FA 配置")
+    -- 检查 URI 是否是登录相关 (通常是 /cgi-bin/luci/ 或 /cgi-bin/luci/admin)
+    if uri:match("^/cgi%-bin/luci/?$") or uri:match("^/cgi%-bin/luci/admin/?$") then
+        log("可能是登录请求，读取 POST 数据进行检查")
+        post_buffer = io.read(content_len)
         
-        -- 读取 UCI 配置
-        local handle = io.popen("uci -q get simple2fa.global.enabled")
-        local enabled = handle:read("*a"):gsub("%s+", "")
+        if post_buffer and post_buffer:match("luci_username=") then
+            need_2fa_check = true
+            log("确认是登录请求，POST 数据已缓存")
+        else
+            log("不是登录请求 (无 luci_username)")
+        end
+    end
+end
+
+-- 执行 2FA 验证
+if need_2fa_check and post_buffer then
+    local username = post_buffer:match("luci_username=([^&]+)")
+    local totp_code = post_buffer:match("totp_code=([^&]*)") or ""
+    
+    log(string.format("登录检测: user=%s, totp_code='%s'", tostring(username), totp_code))
+    
+    if username == "root" then
+        -- 读取配置
+        local handle = io.popen("uci -q get simple2fa.global.enabled 2>/dev/null")
+        local enabled = (handle:read("*a") or ""):gsub("%s+", "")
         handle:close()
-        log(string.format("UCI 读取: enabled='%s'", enabled))
+        
+        log(string.format("2FA 配置: enabled='%s'", enabled))
         
         if enabled == "1" then
-            log("2FA 已启用 -> 开始验证")
-            
-            -- 获取密钥
-            handle = io.popen("uci -q get simple2fa.global.secret")
-            local secret = handle:read("*a"):gsub("%s+", "")
+            handle = io.popen("uci -q get simple2fa.global.secret 2>/dev/null")
+            local secret = (handle:read("*a") or ""):gsub("%s+", "")
             handle:close()
             
             if secret and #secret > 0 then
-                log(string.format("密钥已配置 (长度=%d)", #secret))
-                
-                -- 调用 oathtool 计算正确验证码
-                local cmd = string.format("oathtool -b --totp -d 6 '%s' 2>&1", secret)
+                -- 计算正确的 TOTP
+                local cmd = string.format("oathtool -b --totp -d 6 '%s' 2>/dev/null", secret)
                 handle = io.popen(cmd)
-                local correct_code = handle:read("*a"):gsub("%s+", "")
+                local correct = (handle:read("*a") or ""):gsub("%s+", "")
                 handle:close()
                 
-                log(string.format("TOTP 计算: correct='%s', input='%s'", correct_code, totp_code))
+                log(string.format("TOTP 验证: input='%s', correct='%s'", totp_code, correct))
                 
-                if correct_code ~= "" and totp_code ~= correct_code then
-                    log("❌ 验证失败 -> 重定向到登录页")
-                    print("Status: 302 Found")
-                    print("Location: /cgi-bin/luci?simple2fa_err=1")
-                    print("")
+                if correct ~= "" and totp_code ~= correct then
+                    log("❌ 验证失败 -> 重定向")
+                    io.write("Status: 302 Found\r\n")
+                    io.write("Location: /cgi-bin/luci/?simple2fa_err=1\r\n")
+                    io.write("\r\n")
                     os.exit(0)
                 else
-                    log("✅ 验证成功 (或验证码匹配)")
+                    log("✅ 验证通过")
                 end
             else
-                log("警告: 密钥未配置，跳过验证")
+                log("警告: 密钥未配置")
             end
         else
             log("2FA 未启用，跳过验证")
@@ -80,37 +98,40 @@ if method == "POST" and content_len > 0 and content_len < 10240 then
     end
 end
 
-log("继续执行原始 LuCI 流程...")
-
--- 调用原始 LuCI
-require "luci.cacheloader"
-require "luci.sgi.cgi"
-
--- 如果我们读取了 POST 数据，需要"喂回"给 LuCI
--- 通过设置环境变量和重定向 stdin
-if #post_data > 0 then
-    -- 创建临时文件存储 POST 数据
-    local tmp_file = "/tmp/simple2fa_post_" .. os.time()
-    local f = io.open(tmp_file, "w")
+-- 如果我们读取了 POST 数据，需要通过环境变量/临时文件传递给 LuCI
+if post_buffer then
+    log("将缓存的 POST 数据写入临时文件")
+    local tmp = "/tmp/simple2fa_post_" .. os.time() .. "_" .. math.random(1000, 9999)
+    local f = io.open(tmp, "w")
     if f then
-        f:write(post_data)
+        f:write(post_buffer)
         f:close()
         
-        -- 重新打开作为 stdin
-        io.input(tmp_file)
-        log("POST 数据已存储到临时文件并重定向 stdin")
+        -- 重新打开文件作为新的 stdin
+        local new_stdin = io.open(tmp, "r")
+        if new_stdin then
+            io.input(new_stdin)
+            log("stdin 已重定向到临时文件")
+        end
+        
+        -- 清理临时文件 (延迟删除)
+        os.execute("(sleep 5; rm -f " .. tmp .. ") &")
     end
 end
 
-luci.dispatcher.indexcache = "/tmp/luci-indexcache"
-log("调用 luci.sgi.cgi.run()")
+log("调用原始 LuCI: luci.sgi.cgi.run()")
 
+-- 调用原始 LuCI
 local ok, err = pcall(function()
-    luci.sgi.cgi.run()
+    sgi.run()
 end)
 
 if not ok then
     log(string.format("LuCI 执行错误: %s", tostring(err)))
+    -- 输出错误页面
+    io.write("Status: 500 Internal Server Error\r\n")
+    io.write("Content-Type: text/html\r\n\r\n")
+    io.write("<h1>Simple2FA Error</h1><pre>" .. tostring(err) .. "</pre>")
 end
 
 log("========== CGI 结束 ==========")

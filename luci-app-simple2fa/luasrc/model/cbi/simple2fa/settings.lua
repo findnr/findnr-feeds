@@ -108,8 +108,14 @@ function m.on_after_commit(self)
     -- Debug: 记录保存操作
     sys.call("logger -t simple2fa '[settings.lua] on_after_commit 被调用'")
     
-    local enabled = uci:get("simple2fa", "global", "enabled") == "1"
-    sys.call(string.format("logger -t simple2fa '[settings.lua] enabled=%s'", tostring(enabled)))
+    -- 重要修复: 创建一个新的 UCI cursor 来读取刚提交的配置
+    -- 旧的 cursor (文件顶部创建的) 可能有缓存的旧值
+    local fresh_uci = require("luci.model.uci").cursor()
+    local enabled_val = fresh_uci:get("simple2fa", "global", "enabled")
+    local enabled = (enabled_val == "1")
+    
+    sys.call(string.format("logger -t simple2fa '[settings.lua] 从新cursor读取: enabled_val=%s, enabled=%s'", 
+        tostring(enabled_val), tostring(enabled)))
     
     if enabled then
         sys.call("logger -t simple2fa '[settings.lua] 执行: /etc/init.d/simple2fa enable'")
