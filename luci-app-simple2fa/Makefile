@@ -26,6 +26,7 @@ define Package/luci-app-simple2fa/install
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99_simple2fa_setup $(1)/etc/uci-defaults/99_simple2fa
 	$(INSTALL_BIN) ./root/usr/share/luci-app-simple2fa/luci $(1)/usr/share/luci-app-simple2fa/luci
 	$(INSTALL_DATA) ./root/usr/share/luci-app-simple2fa/sysauth.htm $(1)/usr/share/luci-app-simple2fa/sysauth.htm
+	$(INSTALL_DATA) ./root/usr/share/luci-app-simple2fa/sysauth.ut $(1)/usr/share/luci-app-simple2fa/sysauth.ut
 endef
 
 define Package/luci-app-simple2fa/prerm

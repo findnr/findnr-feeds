@@ -112,7 +112,9 @@ function m.on_after_commit(self)
     -- 目标文件
     local CGI_TARGET = "/www/cgi-bin/luci"
     local CGI_SOURCE = "/usr/share/luci-app-simple2fa/luci"
-    local SYSAUTH_SOURCE = "/usr/share/luci-app-simple2fa/sysauth.htm"
+    -- SYSAUTH_SOURCE 将根据检测到的目标格式动态设置
+    local SYSAUTH_SOURCE_HTM = "/usr/share/luci-app-simple2fa/sysauth.htm"
+    local SYSAUTH_SOURCE_UT = "/usr/share/luci-app-simple2fa/sysauth.ut"
     
     -- =====================================================
     -- 动态检测当前主题并设置正确的模板路径
@@ -126,25 +128,51 @@ function m.on_after_commit(self)
     sys.call(string.format("logger -t simple2fa '[settings.lua] 当前主题: %s (from mediaurlbase=%s)'", 
         theme_name, mediaurlbase))
     
-    -- 构建可能的模板路径 (按优先级)
+    -- 构建所有可能的模板路径 (按优先级)
+    -- 包括 .htm (Lua模板) 和 .ut (ucode模板) 两种格式
     local SYSAUTH_TARGETS = {
-        string.format("/usr/lib/lua/luci/view/themes/%s/sysauth.htm", theme_name),  -- 当前主题
-        "/usr/lib/lua/luci/view/sysauth.htm"  -- 基础模板 (fallback)
+        -- 当前主题的 .htm 模板
+        string.format("/usr/lib/lua/luci/view/themes/%s/sysauth.htm", theme_name),
+        -- 当前主题的 .ut 模板 (新版 LuCI)
+        string.format("/usr/share/ucode/luci/template/themes/%s/sysauth.ut", theme_name),
+        -- Bootstrap 主题 (常见默认)
+        "/usr/lib/lua/luci/view/themes/bootstrap/sysauth.htm",
+        "/usr/share/ucode/luci/template/themes/bootstrap/sysauth.ut",
+        -- 基础模板目录
+        "/usr/lib/lua/luci/view/sysauth.htm",
+        "/usr/share/ucode/luci/template/sysauth.ut",
     }
+    
+    -- 列出所有检查的路径
+    sys.call("logger -t simple2fa '[settings.lua] 开始检测模板路径...'")
     
     -- 找到实际存在的模板路径
     local SYSAUTH_TARGET = nil
     for _, path in ipairs(SYSAUTH_TARGETS) do
-        if fs.access(path) or fs.access(path .. ".bak") then
+        local exists = fs.access(path)
+        local bak_exists = fs.access(path .. ".bak")
+        sys.call(string.format("logger -t simple2fa '[settings.lua] 检查: %s (存在=%s, 备份=%s)'", 
+            path, tostring(exists), tostring(bak_exists)))
+        if exists or bak_exists then
             SYSAUTH_TARGET = path
-            sys.call(string.format("logger -t simple2fa '[settings.lua] 检测到模板: %s'", path))
+            sys.call(string.format("logger -t simple2fa '[settings.lua] ✓ 使用模板: %s'", path))
             break
         end
     end
     
     if not SYSAUTH_TARGET then
-        sys.call("logger -t simple2fa '[settings.lua] 错误: 未找到任何 sysauth.htm 模板'")
+        sys.call("logger -t simple2fa '[settings.lua] 错误: 未找到任何 sysauth 模板! 请检查 LuCI 安装'")
         return
+    end
+    
+    -- 根据目标文件格式选择对应的源文件
+    local SYSAUTH_SOURCE
+    if SYSAUTH_TARGET:match("%.ut$") then
+        SYSAUTH_SOURCE = SYSAUTH_SOURCE_UT
+        sys.call("logger -t simple2fa '[settings.lua] 使用 ucode 模板源文件'")
+    else
+        SYSAUTH_SOURCE = SYSAUTH_SOURCE_HTM
+        sys.call("logger -t simple2fa '[settings.lua] 使用 Lua 模板源文件'")
     end
     
     -- 从新 cursor 读取配置
