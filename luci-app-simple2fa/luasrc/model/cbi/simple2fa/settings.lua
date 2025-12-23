@@ -103,30 +103,102 @@ qr.description = translate("Use Google Authenticator, Authy or Microsoft Auth to
 qr.template = "simple2fa/qrcode_view" 
 qr.otp_url = otp_url 
 
--- === 6. 应用更改逻辑 (通过 Init 脚本) ===
+-- === 6. 应用更改逻辑 (直接在 Lua 中操作，避免 shell UCI 竞态) ===
 function m.on_after_commit(self)
-    -- Debug: 记录保存操作
+    local fs = require("nixio.fs")
+    
     sys.call("logger -t simple2fa '[settings.lua] on_after_commit 被调用'")
     
-    -- 重要修复: 创建一个新的 UCI cursor 来读取刚提交的配置
-    -- 旧的 cursor (文件顶部创建的) 可能有缓存的旧值
+    -- 目标文件
+    local CGI_TARGET = "/www/cgi-bin/luci"
+    local SYSAUTH_TARGET = "/usr/lib/lua/luci/view/sysauth.htm"
+    local CGI_SOURCE = "/usr/share/luci-app-simple2fa/luci"
+    local SYSAUTH_SOURCE = "/usr/share/luci-app-simple2fa/sysauth.htm"
+    
+    -- 从新 cursor 读取配置
     local fresh_uci = require("luci.model.uci").cursor()
     local enabled_val = fresh_uci:get("simple2fa", "global", "enabled")
     local enabled = (enabled_val == "1")
     
-    sys.call(string.format("logger -t simple2fa '[settings.lua] 从新cursor读取: enabled_val=%s, enabled=%s'", 
+    sys.call(string.format("logger -t simple2fa '[settings.lua] enabled_val=%s, enabled=%s'", 
         tostring(enabled_val), tostring(enabled)))
     
     if enabled then
-        sys.call("logger -t simple2fa '[settings.lua] 执行: /etc/init.d/simple2fa enable'")
-        sys.call("/etc/init.d/simple2fa enable")
-        sys.call("logger -t simple2fa '[settings.lua] 执行: /etc/init.d/simple2fa start'")
-        sys.call("/etc/init.d/simple2fa start")
+        sys.call("logger -t simple2fa '[settings.lua] 启用 2FA - 开始替换文件'")
+        
+        -- 备份 CGI
+        if fs.access(CGI_TARGET) and not fs.access(CGI_TARGET .. ".bak") then
+            local content = fs.readfile(CGI_TARGET)
+            if content and not content:match("Simple2FA") then
+                fs.writefile(CGI_TARGET .. ".bak", content)
+                sys.call("logger -t simple2fa '[settings.lua] CGI 备份成功'")
+            end
+        end
+        
+        -- 备份 sysauth.htm
+        if fs.access(SYSAUTH_TARGET) and not fs.access(SYSAUTH_TARGET .. ".bak") then
+            local content = fs.readfile(SYSAUTH_TARGET)
+            if content then
+                fs.writefile(SYSAUTH_TARGET .. ".bak", content)
+                sys.call("logger -t simple2fa '[settings.lua] 模板备份成功'")
+            end
+        end
+        
+        -- 安装我们的 CGI
+        if fs.access(CGI_SOURCE) then
+            local content = fs.readfile(CGI_SOURCE)
+            if content then
+                fs.writefile(CGI_TARGET, content)
+                fs.chmod(CGI_TARGET, 755)
+                sys.call("logger -t simple2fa '[settings.lua] CGI 安装成功'")
+            end
+        else
+            sys.call("logger -t simple2fa '[settings.lua] 错误: CGI 源文件不存在'")
+        end
+        
+        -- 安装我们的 sysauth.htm
+        if fs.access(SYSAUTH_SOURCE) then
+            local content = fs.readfile(SYSAUTH_SOURCE)
+            if content then
+                fs.writefile(SYSAUTH_TARGET, content)
+                sys.call("logger -t simple2fa '[settings.lua] 模板安装成功'")
+            end
+        else
+            sys.call("logger -t simple2fa '[settings.lua] 错误: 模板源文件不存在'")
+        end
+        
+        -- 启用 init 脚本 (仅用于开机启动)
+        sys.call("/etc/init.d/simple2fa enable 2>/dev/null")
+        
+        sys.call("logger -t simple2fa '[settings.lua] 2FA 已激活'")
     else
-        sys.call("logger -t simple2fa '[settings.lua] 执行: /etc/init.d/simple2fa stop'")
-        sys.call("/etc/init.d/simple2fa stop")
-        sys.call("logger -t simple2fa '[settings.lua] 执行: /etc/init.d/simple2fa disable'")
-        sys.call("/etc/init.d/simple2fa disable")
+        sys.call("logger -t simple2fa '[settings.lua] 禁用 2FA - 开始恢复文件'")
+        
+        -- 恢复 CGI
+        if fs.access(CGI_TARGET .. ".bak") then
+            local content = fs.readfile(CGI_TARGET .. ".bak")
+            if content then
+                fs.writefile(CGI_TARGET, content)
+                fs.chmod(CGI_TARGET, 755)
+                fs.remove(CGI_TARGET .. ".bak")
+                sys.call("logger -t simple2fa '[settings.lua] CGI 恢复成功'")
+            end
+        end
+        
+        -- 恢复 sysauth.htm
+        if fs.access(SYSAUTH_TARGET .. ".bak") then
+            local content = fs.readfile(SYSAUTH_TARGET .. ".bak")
+            if content then
+                fs.writefile(SYSAUTH_TARGET, content)
+                fs.remove(SYSAUTH_TARGET .. ".bak")
+                sys.call("logger -t simple2fa '[settings.lua] 模板恢复成功'")
+            end
+        end
+        
+        -- 禁用 init 脚本
+        sys.call("/etc/init.d/simple2fa disable 2>/dev/null")
+        
+        sys.call("logger -t simple2fa '[settings.lua] 2FA 已禁用'")
     end
     
     sys.call("logger -t simple2fa '[settings.lua] on_after_commit 完成'")
