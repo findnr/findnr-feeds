@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=cymfrp
-PKG_VERSION:=0.65.0
+PKG_VERSION:=0.66.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=frp-$(PKG_VERSION).tar.gz
