@@ -47,6 +47,42 @@ local s = m:section(NamedSection, "global", "settings", translate("Settings"))
 -- === 2. 功能开关 ===
 s:option(Flag, "enabled", translate("Enable Two-Factor Auth"))
 
+-- === 2.1 启用前验证设置 ===
+local vcode = s:option(Value, "verify_code", translate("Verification Code"))
+vcode.description = translate("To prevent locking yourself out, you must input a valid 6-digit code before enabling.")
+vcode.datatype = "uinteger"
+vcode.depends("enabled", "1")
+vcode.rmempty = true
+
+function vcode.validate(self, value, section)
+    -- Only validate if user is trying to turn it on
+    local enabled = m:formvalue("cbid.simple2fa.global.enabled")
+    if enabled == "1" then
+        if not value or string.len(value) ~= 6 then
+            return nil, translate("Please enter a valid 6-digit verification code.")
+        end
+
+        local secret = uci:get("simple2fa", "global", "secret")
+        if not secret then
+            return nil, translate("Secret key not found!")
+        end
+
+        -- Call oathtool to verify the code
+        local cmd = string.format("oathtool --totp -w 2 -b %s %s >/dev/null 2>&1", secret, value)
+        local result = sys.call(cmd)
+        
+        if result ~= 0 then
+            return nil, translate("Verification failed! Please check your router and phone time synchronization, or ensure the code is correct.")
+        end
+    end
+    -- We don't need to save this to UCI, so return the value for validation passing only
+    return value
+end
+
+function vcode.write()
+    -- Prevent saving to UCI
+end
+
 -- === 3. 显示密钥 (带复制功能) ===
 local o = s:option(DummyValue, "_secret_display", translate("Secret Key"))
 o.description = translate("If you cannot scan the QR code, enter this key manually.")
@@ -112,68 +148,8 @@ function m.on_after_commit(self)
     -- 目标文件
     local CGI_TARGET = "/www/cgi-bin/luci"
     local CGI_SOURCE = "/usr/share/luci-app-simple2fa/luci"
-    -- SYSAUTH_SOURCE 将根据检测到的目标格式动态设置
     local SYSAUTH_SOURCE_HTM = "/usr/share/luci-app-simple2fa/sysauth.htm"
     local SYSAUTH_SOURCE_UT = "/usr/share/luci-app-simple2fa/sysauth.ut"
-    
-    -- =====================================================
-    -- 动态检测当前主题并设置正确的模板路径
-    -- 从 UCI 读取 luci.main.mediaurlbase 获取当前主题
-    -- =====================================================
-    local fresh_uci = require("luci.model.uci").cursor()
-    local mediaurlbase = fresh_uci:get("luci", "main", "mediaurlbase") or ""
-    -- mediaurlbase 格式: /luci-static/bootstrap 或 /luci-static/argon
-    local theme_name = mediaurlbase:match("/luci%-static/([^/]+)") or "bootstrap"
-    
-    sys.call(string.format("logger -t simple2fa '[settings.lua] 当前主题: %s (from mediaurlbase=%s)'", 
-        theme_name, mediaurlbase))
-    
-    -- 构建所有可能的模板路径 (按优先级)
-    -- 包括 .htm (Lua模板) 和 .ut (ucode模板) 两种格式
-    local SYSAUTH_TARGETS = {
-        -- 当前主题的 .htm 模板
-        string.format("/usr/lib/lua/luci/view/themes/%s/sysauth.htm", theme_name),
-        -- 当前主题的 .ut 模板 (新版 LuCI)
-        string.format("/usr/share/ucode/luci/template/themes/%s/sysauth.ut", theme_name),
-        -- Bootstrap 主题 (常见默认)
-        "/usr/lib/lua/luci/view/themes/bootstrap/sysauth.htm",
-        "/usr/share/ucode/luci/template/themes/bootstrap/sysauth.ut",
-        -- 基础模板目录
-        "/usr/lib/lua/luci/view/sysauth.htm",
-        "/usr/share/ucode/luci/template/sysauth.ut",
-    }
-    
-    -- 列出所有检查的路径
-    sys.call("logger -t simple2fa '[settings.lua] 开始检测模板路径...'")
-    
-    -- 找到实际存在的模板路径
-    local SYSAUTH_TARGET = nil
-    for _, path in ipairs(SYSAUTH_TARGETS) do
-        local exists = fs.access(path)
-        local bak_exists = fs.access(path .. ".bak")
-        sys.call(string.format("logger -t simple2fa '[settings.lua] 检查: %s (存在=%s, 备份=%s)'", 
-            path, tostring(exists), tostring(bak_exists)))
-        if exists or bak_exists then
-            SYSAUTH_TARGET = path
-            sys.call(string.format("logger -t simple2fa '[settings.lua] ✓ 使用模板: %s'", path))
-            break
-        end
-    end
-    
-    if not SYSAUTH_TARGET then
-        sys.call("logger -t simple2fa '[settings.lua] 错误: 未找到任何 sysauth 模板! 请检查 LuCI 安装'")
-        return
-    end
-    
-    -- 根据目标文件格式选择对应的源文件
-    local SYSAUTH_SOURCE
-    if SYSAUTH_TARGET:match("%.ut$") then
-        SYSAUTH_SOURCE = SYSAUTH_SOURCE_UT
-        sys.call("logger -t simple2fa '[settings.lua] 使用 ucode 模板源文件'")
-    else
-        SYSAUTH_SOURCE = SYSAUTH_SOURCE_HTM
-        sys.call("logger -t simple2fa '[settings.lua] 使用 Lua 模板源文件'")
-    end
     
     -- 从新 cursor 读取配置
     local fresh_uci = require("luci.model.uci").cursor()
@@ -182,11 +158,38 @@ function m.on_after_commit(self)
     
     sys.call(string.format("logger -t simple2fa '[settings.lua] enabled_val=%s, enabled=%s'", 
         tostring(enabled_val), tostring(enabled)))
+
+    -- Function to find all sysauth templates across themes
+    local function get_all_sysauth_targets()
+        local targets = {}
+        -- Standard Lua templates
+        local html_themes = fs.glob("/usr/lib/lua/luci/view/themes/*/sysauth.htm")
+        if html_themes then
+            for path in html_themes do table.insert(targets, {path=path, type="htm"}) end
+        end
+        -- Default Lua Template
+        if fs.access("/usr/lib/lua/luci/view/sysauth.htm") then
+            table.insert(targets, {path="/usr/lib/lua/luci/view/sysauth.htm", type="htm"})
+        end
+
+        -- Ucode templates (New LuCI)
+        local ut_themes = fs.glob("/usr/share/ucode/luci/template/themes/*/sysauth.ut")
+        if ut_themes then
+            for path in ut_themes do table.insert(targets, {path=path, type="ut"}) end
+        end
+        -- Default Ucode Template
+        if fs.access("/usr/share/ucode/luci/template/sysauth.ut") then
+            table.insert(targets, {path="/usr/share/ucode/luci/template/sysauth.ut", type="ut"})
+        end
+        return targets
+    end
+
+    local all_targets = get_all_sysauth_targets()
     
     if enabled then
-        sys.call("logger -t simple2fa '[settings.lua] 启用 2FA - 开始替换文件'")
+        sys.call("logger -t simple2fa '[settings.lua] 启用 2FA - 开始替换所有主题文件'")
         
-        -- 备份 CGI
+        -- 备份并替换 CGI
         if fs.access(CGI_TARGET) and not fs.access(CGI_TARGET .. ".bak") then
             local content = fs.readfile(CGI_TARGET)
             if content and not content:match("Simple2FA") then
@@ -194,43 +197,32 @@ function m.on_after_commit(self)
                 sys.call("logger -t simple2fa '[settings.lua] CGI 备份成功'")
             end
         end
-        
-        -- 备份 sysauth.htm
-        if fs.access(SYSAUTH_TARGET) and not fs.access(SYSAUTH_TARGET .. ".bak") then
-            local content = fs.readfile(SYSAUTH_TARGET)
-            if content then
-                fs.writefile(SYSAUTH_TARGET .. ".bak", content)
-                sys.call("logger -t simple2fa '[settings.lua] 模板备份成功'")
-            end
-        end
-        
-        -- 安装我们的 CGI
         if fs.access(CGI_SOURCE) then
             local content = fs.readfile(CGI_SOURCE)
             if content then
                 fs.writefile(CGI_TARGET, content)
                 fs.chmod(CGI_TARGET, 755)
-                sys.call("logger -t simple2fa '[settings.lua] CGI 安装成功'")
             end
-        else
-            sys.call("logger -t simple2fa '[settings.lua] 错误: CGI 源文件不存在'")
         end
         
-        -- 安装我们的 sysauth.htm
-        if fs.access(SYSAUTH_SOURCE) then
-            local content = fs.readfile(SYSAUTH_SOURCE)
-            if content then
-                fs.writefile(SYSAUTH_TARGET, content)
-                sys.call("logger -t simple2fa '[settings.lua] 模板安装成功'")
+        -- 备份并替换所有主题的 sysauth 模板
+        for _, target in ipairs(all_targets) do
+            local path = target.path
+            if fs.access(path) and not fs.access(path .. ".bak") then
+                local content = fs.readfile(path)
+                if content then fs.writefile(path .. ".bak", content) end
             end
-        else
-            sys.call("logger -t simple2fa '[settings.lua] 错误: 模板源文件不存在'")
+            
+            local source_file = (target.type == "ut") and SYSAUTH_SOURCE_UT or SYSAUTH_SOURCE_HTM
+            if fs.access(source_file) then
+                local content = fs.readfile(source_file)
+                if content then fs.writefile(path, content) end
+                sys.call(string.format("logger -t simple2fa '[settings.lua] 注入模板: %s'", path))
+            end
         end
         
-        -- 启用 init 脚本 (仅用于开机启动)
         sys.call("/etc/init.d/simple2fa enable 2>/dev/null")
-        
-        sys.call("logger -t simple2fa '[settings.lua] 2FA 已激活'")
+        sys.call("logger -t simple2fa '[settings.lua] 2FA 已在所有主题激活'")
     else
         sys.call("logger -t simple2fa '[settings.lua] 禁用 2FA - 开始恢复文件'")
         
@@ -241,27 +233,25 @@ function m.on_after_commit(self)
                 fs.writefile(CGI_TARGET, content)
                 fs.chmod(CGI_TARGET, 755)
                 fs.remove(CGI_TARGET .. ".bak")
-                sys.call("logger -t simple2fa '[settings.lua] CGI 恢复成功'")
             end
         end
         
-        -- 恢复 sysauth.htm
-        if fs.access(SYSAUTH_TARGET .. ".bak") then
-            local content = fs.readfile(SYSAUTH_TARGET .. ".bak")
-            if content then
-                fs.writefile(SYSAUTH_TARGET, content)
-                fs.remove(SYSAUTH_TARGET .. ".bak")
-                sys.call("logger -t simple2fa '[settings.lua] 模板恢复成功'")
+        -- 恢复所有 sysauth 模板
+        for _, target in ipairs(all_targets) do
+            local path = target.path
+            if fs.access(path .. ".bak") then
+                local content = fs.readfile(path .. ".bak")
+                if content then
+                    fs.writefile(path, content)
+                    fs.remove(path .. ".bak")
+                    sys.call(string.format("logger -t simple2fa '[settings.lua] 恢复模板: %s'", path))
+                end
             end
         end
         
-        -- 禁用 init 脚本
         sys.call("/etc/init.d/simple2fa disable 2>/dev/null")
-        
-        sys.call("logger -t simple2fa '[settings.lua] 2FA 已禁用'")
+        sys.call("logger -t simple2fa '[settings.lua] 2FA 已全面禁用'")
     end
-    
-    sys.call("logger -t simple2fa '[settings.lua] on_after_commit 完成'")
 end
 
 return m

@@ -1,12 +1,11 @@
 #!/bin/sh
 # CymOnline Network Control Script
-# Provides traffic monitoring and speed limiting via iptables + tc
+# Provides traffic monitoring and speed limiting via nftables + tc (fw4 compatible)
 
 . /lib/functions.sh
 
 # Configuration
-CHAIN_NAME="CYMONLINE"
-MANGLE_CHAIN="CYMONLINE_MARK"
+FW_TABLE="inet cymonline"
 
 # Get interface from UCI or use defaults
 get_interfaces() {
@@ -16,94 +15,100 @@ get_interfaces() {
 }
 
 # ============================================================
-# Traffic Monitoring
+# Traffic Monitoring (nftables dynamic sets)
 # ============================================================
 
 init_traffic() {
 	get_interfaces
 
-	# Create custom chains for traffic accounting
-	iptables -t mangle -N "$CHAIN_NAME" 2>/dev/null
-	iptables -t mangle -F "$CHAIN_NAME"
+	# Ensure nft is available
+	which nft >/dev/null 2>&1 || {
+		echo "ERROR: nft command not found"
+		return 1
+	}
 
-	# Hook into FORWARD chain
-	iptables -t mangle -C FORWARD -j "$CHAIN_NAME" 2>/dev/null || \
-		iptables -t mangle -I FORWARD -j "$CHAIN_NAME"
+	# Clean up any old table and re-create it
+	nft delete table $FW_TABLE 2>/dev/null
+	nft add table $FW_TABLE
 
-	# Create marking chain for speed limits
-	iptables -t mangle -N "$MANGLE_CHAIN" 2>/dev/null
-	iptables -t mangle -F "$MANGLE_CHAIN"
+	# Create dynamic sets for RX/TX bytes and block set
+	# Timeout ensures offline devices eventually get cleared
+	nft add set $FW_TABLE rx_bytes "{ type ipv4_addr; flags dynamic; timeout 30d; counter; }"
+	nft add set $FW_TABLE tx_bytes "{ type ipv4_addr; flags dynamic; timeout 30d; counter; }"
+	nft add set $FW_TABLE block_set "{ type ipv4_addr; }"
 
-	# Hook POSTROUTING for download (traffic going to devices)
-	iptables -t mangle -C POSTROUTING -o "$LAN_IFACE" -j "$MANGLE_CHAIN" 2>/dev/null || \
-		iptables -t mangle -I POSTROUTING -o "$LAN_IFACE" -j "$MANGLE_CHAIN"
+	# Hook into FORWARD chain to catch routed traffic
+	nft add chain $FW_TABLE forward "{ type filter hook forward priority filter; policy accept; }"
 
-	echo "Traffic monitoring initialized"
+	# Block traffic for IPs in block_set
+	nft add rule $FW_TABLE forward ip saddr @block_set drop
+	nft add rule $FW_TABLE forward ip daddr @block_set drop
+
+	# Update sets directly on matched packets
+	# Traffic TO an IP: daddr
+	nft add rule $FW_TABLE forward update @rx_bytes "{ ip daddr counter }"
+	# Traffic FROM an IP: saddr
+	nft add rule $FW_TABLE forward update @tx_bytes "{ ip saddr counter }"
+
+	# Hook POSTROUTING for download limiting (traffic going to devices out on LAN_IFACE)
+	nft add chain $FW_TABLE postrouting "{ type filter hook postrouting priority mangle; policy accept; }"
+	nft add map $FW_TABLE limit_map "{ type ipv4_addr : mark; }"
+
+	# Apply mark based on the limit_map
+	nft add rule $FW_TABLE postrouting meta mark set ip daddr map @limit_map
+
+	echo "Traffic monitoring initialized (nftables)"
 }
 
 cleanup_traffic() {
-	get_interfaces
-
-	# Remove hooks
-	iptables -t mangle -D FORWARD -j "$CHAIN_NAME" 2>/dev/null
-	iptables -t mangle -D POSTROUTING -o "$LAN_IFACE" -j "$MANGLE_CHAIN" 2>/dev/null
-
-	# Flush and delete chains
-	iptables -t mangle -F "$CHAIN_NAME" 2>/dev/null
-	iptables -t mangle -X "$CHAIN_NAME" 2>/dev/null
-	iptables -t mangle -F "$MANGLE_CHAIN" 2>/dev/null
-	iptables -t mangle -X "$MANGLE_CHAIN" 2>/dev/null
-
+	nft delete table $FW_TABLE 2>/dev/null
 	echo "Traffic monitoring cleaned up"
 }
 
-# Add traffic counter for an IP
+# In nftables with dynamic sets, we don't need to manually add counters for new IPs! 
+# They are added atomically upon seeing traffic.
 add_traffic_counter() {
-	local ip="$1"
-	# Download (to this IP)
-	iptables -t mangle -C "$CHAIN_NAME" -d "$ip" -j RETURN 2>/dev/null || \
-		iptables -t mangle -A "$CHAIN_NAME" -d "$ip" -j RETURN
-	# Upload (from this IP)
-	iptables -t mangle -C "$CHAIN_NAME" -s "$ip" -j RETURN 2>/dev/null || \
-		iptables -t mangle -A "$CHAIN_NAME" -s "$ip" -j RETURN
+	# Keep function for backward compatibility with lua scripts that might still call it,
+	# but no operation needed.
+	:
 }
 
-# Get traffic stats for an IP (returns: rx_bytes tx_bytes rx_packets tx_packets)
+# Kept for backward compatibility, although get_all_stats is preferred
 get_traffic_stats() {
 	local ip="$1"
-	local rx_bytes=0 tx_bytes=0 rx_pkts=0 tx_pkts=0
-
-	# Download (destination = IP)
-	local dl=$(iptables -t mangle -L "$CHAIN_NAME" -v -n -x 2>/dev/null | grep -E "^\s*[0-9]+" | awk -v ip="$ip" '$9 == ip {print $2, $1}')
-	if [ -n "$dl" ]; then
-		rx_bytes=$(echo "$dl" | awk '{print $1}')
-		rx_pkts=$(echo "$dl" | awk '{print $2}')
-	fi
-
-	# Upload (source = IP)
-	local ul=$(iptables -t mangle -L "$CHAIN_NAME" -v -n -x 2>/dev/null | grep -E "^\s*[0-9]+" | awk -v ip="$ip" '$8 == ip {print $2, $1}')
-	if [ -n "$ul" ]; then
-		tx_bytes=$(echo "$ul" | awk '{print $1}')
-		tx_pkts=$(echo "$ul" | awk '{print $2}')
-	fi
-
-	echo "$rx_bytes $tx_bytes $rx_pkts $tx_pkts"
+	local rx_bytes=$(nft list set $FW_TABLE rx_bytes 2>/dev/null | grep -oE "$ip counter packets [0-9]+ bytes [0-9]+" | awk '{print $6}')
+	local tx_bytes=$(nft list set $FW_TABLE tx_bytes 2>/dev/null | grep -oE "$ip counter packets [0-9]+ bytes [0-9]+" | awk '{print $6}')
+	
+	echo "${rx_bytes:-0} ${tx_bytes:-0} 0 0" 
 }
 
 # Get all traffic stats at once (returns lines of: IP RX_BYTES TX_BYTES)
 get_all_stats() {
-	# Get all rules from the chain
-	# Column 2: bytes, Column 8: source, Column 9: destination
-	iptables -t mangle -L "$CHAIN_NAME" -v -n -x 2>/dev/null | grep -E "^\s*[0-9]+" | awk '
-	$9 != "0.0.0.0/0" { rx[$9] = $2 }
-	$8 != "0.0.0.0/0" { tx[$8] = $2 }
-	END {
-		for (ip in rx) {
-			print ip, rx[ip], (tx[ip] ? tx[ip] : 0)
+	# Use regex grep to pull the exact element strings regardless of how nft formats the output array
+	local rx_out=$(nft list set $FW_TABLE rx_bytes 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ counter packets [0-9]+ bytes [0-9]+' || echo "")
+	local tx_out=$(nft list set $FW_TABLE tx_bytes 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ counter packets [0-9]+ bytes [0-9]+' || echo "")
+
+	awk -v rx="$rx_out" -v tx="$tx_out" '
+	BEGIN {
+		split(rx, ra, "\n")
+		for (i in ra) {
+			split(ra[i], r_elem, " ")
+			if (r_elem[1]) r[r_elem[1]] = r_elem[6]
 		}
-		for (ip in tx) {
-			if (!(ip in rx)) {
-				print ip, 0, tx[ip]
+		
+		split(tx, ta, "\n")
+		for (i in ta) {
+			split(ta[i], t_elem, " ")
+			if (t_elem[1]) t[t_elem[1]] = t_elem[6]
+		}
+		
+		for (ip in r) {
+			print ip, r[ip], (t[ip] ? t[ip] : 0)
+			seen[ip] = 1
+		}
+		for (ip in t) {
+			if (!seen[ip]) {
+				print ip, 0, t[ip]
 			}
 		}
 	}'
@@ -113,21 +118,17 @@ get_all_stats() {
 # Speed Limiting (tc HTB on LAN interface)
 # ============================================================
 
-# Initialize tc qdisc on LAN interface
 init_tc() {
 	get_interfaces
 
-	# Check if tc is available
 	which tc >/dev/null 2>&1 || {
 		echo "ERROR: tc command not found"
 		return 1
 	}
 
-	# Setup tc on LAN interface (for download limiting to devices)
 	tc qdisc del dev "$LAN_IFACE" root 2>/dev/null
 	tc qdisc add dev "$LAN_IFACE" root handle 1: htb default 9999
 	tc class add dev "$LAN_IFACE" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit
-	# Default class - unlimited
 	tc class add dev "$LAN_IFACE" parent 1:1 classid 1:9999 htb rate 1000mbit ceil 1000mbit
 
 	echo "TC qdisc initialized on $LAN_IFACE"
@@ -139,28 +140,24 @@ cleanup_tc() {
 	echo "TC qdisc cleaned up"
 }
 
-# Convert MAC to a unique mark number (range 100-65100)
 mac_to_mark() {
 	local mac="$1"
-	# Use last 2 octets as mark (simple hash)
-	local last2=$(echo "$mac" | awk -F: '{print $5$6}' | tr 'a-f' 'A-F')
-	local mark=$(printf "%d" "0x$last2" 2>/dev/null)
-	mark=$((mark % 65000 + 100))
+	# Better collision resistance: use MD5 hash truncated to avoid just last 2 bytes collision
+	local hashStr=$(echo "$mac" | md5sum | cut -c 1-5)
+	# Convert hex snippet to a decimal mark, keep under 65000 range map for standard classid usage
+	local mark=$(printf "%d" "0x$hashStr" 2>/dev/null)
+	mark=$(( mark % 60000 + 100 ))
 	echo "$mark"
 }
 
-# Ensure tc is initialized
 ensure_tc_ready() {
 	get_interfaces
-	# Check if our qdisc exists
 	tc qdisc show dev "$LAN_IFACE" 2>/dev/null | grep -q "htb 1:" || {
 		echo "Initializing tc..."
 		init_tc
 	}
 }
 
-# Set speed limit for a MAC address
-# Usage: set_limit <MAC> <UP_KBPS> <DOWN_KBPS>
 set_limit() {
 	local mac="$1"
 	local up_kbps="$2"
@@ -168,22 +165,15 @@ set_limit() {
 
 	get_interfaces
 	
-	# Validate MAC
-	[ -z "$mac" ] && {
-		echo "ERROR: MAC address required"
-		return 1
-	}
+	[ -z "$mac" ] && { echo "ERROR: MAC required"; return 1; }
 
-	# Convert MAC to uppercase
 	mac=$(echo "$mac" | tr 'a-f' 'A-F')
 
-	# If both are 0, remove limit
 	[ "$up_kbps" = "0" ] && [ "$down_kbps" = "0" ] && {
 		remove_limit "$mac"
 		return 0
 	}
 
-	# Ensure tc is ready
 	ensure_tc_ready
 
 	local mark=$(mac_to_mark "$mac")
@@ -191,91 +181,107 @@ set_limit() {
 
 	echo "Setting limit for MAC=$mac mark=$mark classid=1:$classid down=${down_kbps}kbps"
 
-	# Remove existing rules first
+	# Safe remove first
 	remove_limit "$mac"
 
-	# We need to find the IP for this MAC to create iptables rules
 	local ip=$(cat /proc/net/arp | grep -i "$mac" | awk '{print $1}' | head -1)
 	
 	if [ -z "$ip" ]; then
 		echo "WARNING: Cannot find IP for MAC $mac (device may be offline)"
-		# Still save it - it will apply when the device comes online
 	fi
 
-	# Add tc class for download limiting
 	if [ "$down_kbps" != "0" ] && [ -n "$down_kbps" ]; then
-		# Create the limited class
 		tc class add dev "$LAN_IFACE" parent 1:1 classid "1:$classid" htb rate "${down_kbps}kbit" ceil "${down_kbps}kbit" 2>/dev/null
-		
-		# Add filter by mark
 		tc filter add dev "$LAN_IFACE" parent 1: protocol ip prio 1 handle "$mark" fw flowid "1:$classid" 2>/dev/null
 		
-		# Add iptables rule to mark packets going TO this IP
+		# nftables map injection
 		if [ -n "$ip" ]; then
-			iptables -t mangle -A "$MANGLE_CHAIN" -d "$ip" -j MARK --set-mark "$mark" 2>/dev/null
-			echo "Added iptables mark rule for IP $ip -> mark $mark"
+			nft add element $FW_TABLE limit_map "{ $ip : $mark }" 2>/dev/null
+			echo "Added nftables limit element for IP $ip -> mark $mark"
 		fi
 	fi
 
-	echo "Speed limit set for $mac: down=${down_kbps}kbps (up limiting not yet implemented)"
 	return 0
 }
 
-# Remove speed limit for a MAC address
+set_block() {
+	local mac="$1"
+	local blocked="$2"
+	get_interfaces
+
+	[ -z "$mac" ] && { echo "ERROR: MAC required"; return 1; }
+	mac=$(echo "$mac" | tr 'a-f' 'A-F')
+
+	local ip=$(cat /proc/net/arp | grep -i "$mac" | awk '{print $1}' | head -1)
+	
+	if [ -n "$ip" ]; then
+		if [ "$blocked" = "1" ]; then
+			nft add element $FW_TABLE block_set "{ $ip }" 2>/dev/null
+			echo "Blocked IP $ip (MAC $mac)"
+		else
+			nft delete element $FW_TABLE block_set "{ $ip }" 2>/dev/null
+			echo "Unblocked IP $ip (MAC $mac)"
+		fi
+	else
+		echo "WARNING: Cannot find IP for MAC $mac (device may be offline)"
+	fi
+}
+
+remove_block() {
+	local mac="$1"
+	get_interfaces
+
+	mac=$(echo "$mac" | tr 'a-f' 'A-F')
+	local ip=$(cat /proc/net/arp | grep -i "$mac" | awk '{print $1}' | head -1)
+
+	if [ -n "$ip" ]; then
+		nft delete element $FW_TABLE block_set "{ $ip }" 2>/dev/null
+		echo "Removed block for IP $ip (MAC $mac)"
+	fi
+}
+
 remove_limit() {
 	local mac="$1"
 	get_interfaces
 
-	# Convert MAC to uppercase
 	mac=$(echo "$mac" | tr 'a-f' 'A-F')
-
 	local mark=$(mac_to_mark "$mac")
 	local classid=$((mark % 9000 + 10))
 
-	echo "Removing limit for MAC=$mac mark=$mark classid=1:$classid"
-
-	# Find the IP for this MAC
 	local ip=$(cat /proc/net/arp | grep -i "$mac" | awk '{print $1}' | head -1)
 
-	# Remove iptables rules (try with IP if found)
 	if [ -n "$ip" ]; then
-		while iptables -t mangle -D "$MANGLE_CHAIN" -d "$ip" -j MARK --set-mark "$mark" 2>/dev/null; do :; done
+		# Exact element match deletion via nftables
+		nft delete element $FW_TABLE limit_map "{ $ip }" 2>/dev/null
 	fi
 
-	# Also try to remove any rules with this mark
-	# This handles cases where IP changed
-	iptables-save -t mangle 2>/dev/null | grep "MARK --set-xmark 0x$(printf '%x' $mark)" | while read line; do
-		rule=$(echo "$line" | sed 's/-A /-D /')
-		eval "iptables -t mangle $rule" 2>/dev/null
-	done
-
-	# Remove tc filter and class
 	tc filter del dev "$LAN_IFACE" parent 1: handle "$mark" fw 2>/dev/null
 	tc class del dev "$LAN_IFACE" classid "1:$classid" 2>/dev/null
-
-	echo "Speed limit removed for $mac"
 }
 
-# Restore all limits from UCI config
 restore_limits() {
-	echo "Restoring speed limits from config..."
-	
+	echo "Restoring speed limits and blocks from config..."
 	init_tc
 
 	config_load cymonline
 
 	restore_device_limit() {
 		local cfg="$1"
-		local mac limit_up limit_down
+		local mac limit_up limit_down blocked
 
 		config_get mac "$cfg" mac
 		config_get limit_up "$cfg" limit_up "0"
 		config_get limit_down "$cfg" limit_down "0"
+		config_get blocked "$cfg" blocked "0"
 
 		if [ -n "$mac" ]; then
 			if [ "$limit_up" != "0" ] || [ "$limit_down" != "0" ]; then
 				echo "Restoring limit for $mac: up=$limit_up down=$limit_down"
 				set_limit "$mac" "$limit_up" "$limit_down"
+			fi
+			if [ "$blocked" = "1" ]; then
+				echo "Restoring block for $mac"
+				set_block "$mac" "1"
 			fi
 		fi
 	}
@@ -286,13 +292,9 @@ restore_limits() {
 
 cleanup_limits() {
 	cleanup_tc
-
-	# Remove all mark rules
-	get_interfaces
-	iptables -t mangle -F "$MANGLE_CHAIN" 2>/dev/null
+	nft flush map $FW_TABLE limit_map 2>/dev/null
 }
 
-# Debug: show current status
 show_status() {
 	echo "=== Interfaces ==="
 	get_interfaces
@@ -312,8 +314,8 @@ show_status() {
 	tc filter show dev "$LAN_IFACE" 2>/dev/null
 	
 	echo ""
-	echo "=== iptables MANGLE Chain ==="
-	iptables -t mangle -L "$MANGLE_CHAIN" -v -n 2>/dev/null
+	echo "=== nftables rules ==="
+	nft list table $FW_TABLE 2>/dev/null
 }
 
 # ============================================================
@@ -345,6 +347,13 @@ case "$1" in
 	remove_limit)
 		remove_limit "$2"
 		;;
+		;;
+	set_block)
+		set_block "$2" "$3"
+		;;
+	remove_block)
+		remove_block "$2"
+		;;
 	restore_limits)
 		restore_limits
 		;;
@@ -355,7 +364,7 @@ case "$1" in
 		show_status
 		;;
 	*)
-		echo "Usage: $0 {init_traffic|cleanup_traffic|add_counter|get_stats|init_tc|set_limit|remove_limit|restore_limits|cleanup_limits|status}"
+		echo "Usage: $0 {init_traffic|cleanup_traffic|add_counter|get_stats|get_all_stats|init_tc|set_limit|remove_limit|set_block|remove_block|restore_limits|cleanup_limits|status}"
 		exit 1
 		;;
 esac

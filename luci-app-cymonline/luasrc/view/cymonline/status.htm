@@ -63,6 +63,11 @@
 			font-weight: bold;
 		}
 
+		.status-blocked {
+			color: #dc3545;
+			font-weight: bold;
+		}
+
 		.status-offline {
 			color: #6c757d;
 		}
@@ -294,7 +299,9 @@
 					html += '<tr data-mac="' + d.mac + '">';
 
 					// Status
-					if (d.online) {
+					if (d.blocked) {
+						html += '<td><span class="status-blocked">🛑 <%:Blocked%></span></td>';
+					} else if (d.online) {
 						html += '<td><span class="status-online">🟢 <%:Online%></span></td>';
 					} else {
 						html += '<td><span class="status-offline">⚫ <%:Offline%></span></td>';
@@ -336,10 +343,15 @@
 
 					// Actions
 					html += '<td>';
-					if (d.online) {
-						html += '<button class="cbi-button cbi-button-neutral" onclick="openLimit(\'' + d.mac + '\', \'' + (d.hostname || d.ip || d.mac) + '\', ' + d.limit_up + ', ' + d.limit_down + ')"><%:Limit%></button>';
+					if (d.blocked) {
+						html += '<button class="cbi-button cbi-button-apply" onclick="toggleBlock(\'' + d.mac + '\', 0)"><%:Unblock%></button> ';
+					} else {
+						html += '<button class="cbi-button cbi-button-remove" onclick="toggleBlock(\'' + d.mac + '\', 1)"><%:Block%></button> ';
 					}
-					if (!d.online || d.remark || d.limit_up > 0 || d.limit_down > 0) {
+					if (d.online && !d.blocked) {
+						html += '<button class="cbi-button cbi-button-neutral" onclick="openLimit(\'' + d.mac + '\', \'' + (d.hostname || d.ip || d.mac) + '\', ' + d.limit_up + ', ' + d.limit_down + ')"><%:Limit%></button> ';
+					}
+					if (!d.online || d.remark || d.limit_up > 0 || d.limit_down > 0 || d.blocked) {
 						html += '<button class="cbi-button cbi-button-remove" onclick="deleteDevice(\'' + d.mac + '\')"><%:Delete%></button>';
 					}
 					html += '</td>';
@@ -372,6 +384,27 @@
 						if (data.success) {
 							input.style.borderColor = '#28a745';
 							setTimeout(function () { input.style.borderColor = 'rgba(0,0,0,0.1)'; }, 1000);
+						}
+					});
+			};
+
+			window.toggleBlock = function (mac, action) {
+				var msg = action === 1 ? '<%:Confirm block this device from accessing internet?%>' : '<%:Confirm unblock this device?%>';
+				if (!confirm(msg)) {
+					return;
+				}
+
+				var formData = new FormData();
+				formData.append('mac', mac);
+				formData.append('action', action.toString());
+
+				fetch(API_BASE + '/block', {
+					method: 'POST',
+					body: formData
+				}).then(function (r) { return r.json(); })
+					.then(function (data) {
+						if (data.success) {
+							loadDevices();
 						}
 					});
 			};

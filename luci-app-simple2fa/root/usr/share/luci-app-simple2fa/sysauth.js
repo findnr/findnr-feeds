@@ -43,33 +43,34 @@ return view.extend({
         ].join('');
 
         // === 3. Smart Insertion (Theme Compatibility) ===
-        var passInput = document.querySelector('input[type="password"]');
-        if (passInput) {
-            // Strategy: Find the container of the password field
-            var container = passInput.parentElement;
-
-            // Check if we are in a 'cbi-value-field' (Standard LuCI)
-            if (container.classList.contains('cbi-value-field')) {
-                // If so, we want to insert AFTER the parent 'cbi-value' div
-                var row = container.parentElement;
-                if (row) {
-                    row.parentNode.insertBefore(tokenDiv, row.nextSibling);
+        // To be compatible with Argon, Material, Bootstrap, and others, 
+        // we should insert our token wrapper just before the submit button container,
+        // rather than relying on assumed 'cbi-value' parent chains of the password input.
+        if (btn && form) {
+            // Find a suitable container to insert before the button
+            var insertionPoint = btn;
+            // Climb up a bit to find the wrapper div of the button if it exists
+            if (btn.parentElement && btn.parentElement.tagName === 'DIV' && btn.parentElement !== form) {
+                insertionPoint = btn.parentElement;
+                // Climb one more level if it's deeply nested (e.g. cbi-value-field -> cbi-value)
+                if (insertionPoint.parentElement && insertionPoint.parentElement.tagName === 'DIV' && insertionPoint.parentElement !== form) {
+                     insertionPoint = insertionPoint.parentElement;
                 }
-            } else {
-                // Argon/Material often wrapping inputs differently
-                // Just insert after the password input's direct container
-                container.parentNode.insertBefore(tokenDiv, container.nextSibling);
             }
+            
+            // Apply neutral styling so it doesn't break Flex/Grid layouts
+            tokenDiv.className = '';
+            tokenDiv.style.margin = '15px 0';
+            tokenDiv.style.width = '100%';
+            
+            tokenDiv.innerHTML = [
+                '<div style="display:flex; flex-direction:column; gap:5px;">',
+                '  <label style="font-weight:bold; color:inherit;">' + _('2FA Code') + '</label>',
+                '  <input class="cbi-input-text input" type="text" id="token_visible" placeholder="' + _('Leave empty if disabled') + '" autocomplete="off" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid rgba(0,0,0,0.2); border-radius:4px;" />',
+                '</div>'
+            ].join('');
 
-            // Adjust styles if it looks like a block layout (Argon)
-            if (window.getComputedStyle(passInput).display === 'block' || passInput.clientWidth > 200) {
-                tokenDiv.className = ''; // Remove cbi-value to avoid float issues
-                tokenDiv.innerHTML = [
-                    '<div style="margin-top:10px;">',
-                    '  <input class="cbi-input-text input" type="text" id="token_visible" placeholder="' + _('2FA Code (Leave empty if disabled)') + '" autocomplete="off" style="width:100%;" />',
-                    '</div>'
-                ].join('');
-            }
+            insertionPoint.parentNode.insertBefore(tokenDiv, insertionPoint);
         } else {
             // Fallback: Append to form
             if (form) form.appendChild(tokenDiv);
@@ -112,6 +113,7 @@ return view.extend({
         }
 
         // Auto-focus password if present
+        var passInput = document.querySelector('input[type="password"]');
         if (passInput) passInput.focus();
 
         return '';

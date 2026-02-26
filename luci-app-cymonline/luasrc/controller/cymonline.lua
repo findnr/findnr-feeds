@@ -15,6 +15,7 @@ function index()
 	entry({"admin", "status", "cymonline", "api", "devices"}, call("api_devices")).leaf = true
 	entry({"admin", "status", "cymonline", "api", "remark"}, call("api_remark")).leaf = true
 	entry({"admin", "status", "cymonline", "api", "limit"}, call("api_limit")).leaf = true
+	entry({"admin", "status", "cymonline", "api", "block"}, call("api_block")).leaf = true
 	entry({"admin", "status", "cymonline", "api", "delete"}, call("api_delete")).leaf = true
 	entry({"admin", "status", "cymonline", "api", "settings"}, call("api_settings")).leaf = true
 end
@@ -64,6 +65,24 @@ function api_limit()
 	end
 
 	local ok = core.set_limit(mac, up, down)
+
+	http.prepare_content("application/json")
+	http.write(json.stringify({ success = ok }))
+end
+
+-- API: Set block status
+function api_block()
+	local core = require "cymonline.core"
+	local mac = http.formvalue("mac")
+	local action = http.formvalue("action") -- "1" for block, "0" for unblock
+
+	if not mac or not action then
+		http.prepare_content("application/json")
+		http.write(json.stringify({ success = false, error = "Missing parameters" }))
+		return
+	end
+
+	local ok = core.set_block(mac, action == "1")
 
 	http.prepare_content("application/json")
 	http.write(json.stringify({ success = ok }))

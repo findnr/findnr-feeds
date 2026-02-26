@@ -100,7 +100,8 @@ local function get_saved_devices()
 			devices[mac] = {
 				remark = s.remark or "",
 				limit_up = tonumber(s.limit_up) or 0,
-				limit_down = tonumber(s.limit_down) or 0
+				limit_down = tonumber(s.limit_down) or 0,
+				blocked = (s.blocked == "1")
 			}
 		end
 	end)
@@ -136,12 +137,7 @@ function get_devices()
 	local saved = get_saved_devices()
 	local devices = {}
 
-	-- Add traffic counters for online devices
-	for mac, info in pairs(arp) do
-		exec(NETWORK_SCRIPT .. " add_counter " .. info.ip)
-	end
-
-	-- Get all traffic stats at once
+	-- Get all traffic stats at once (nftables dynamic sets automatically record all active IPs)
 	local all_stats = get_all_traffic_stats()
 
 	-- Process online devices
@@ -159,7 +155,8 @@ function get_devices()
 			tx_bytes = stat.tx,
 			remark = save.remark or "",
 			limit_up = save.limit_up or 0,
-			limit_down = save.limit_down or 0
+			limit_down = save.limit_down or 0,
+			blocked = save.blocked or false
 		}
 	end
 
@@ -176,7 +173,8 @@ function get_devices()
 				tx_bytes = 0,
 				remark = save.remark,
 				limit_up = save.limit_up,
-				limit_down = save.limit_down
+				limit_down = save.limit_down,
+				blocked = save.blocked or false
 			}
 		end
 	end
@@ -218,7 +216,8 @@ function save_remark(mac, remark)
 			mac = mac,
 			remark = remark,
 			limit_up = "0",
-			limit_down = "0"
+			limit_down = "0",
+			blocked = "0"
 		})
 	end
 
@@ -249,7 +248,8 @@ function set_limit(mac, up_kbps, down_kbps)
 			mac = mac,
 			remark = "",
 			limit_up = tostring(up_kbps),
-			limit_down = tostring(down_kbps)
+			limit_down = tostring(down_kbps),
+			blocked = "0"
 		})
 	end
 
@@ -261,12 +261,48 @@ function set_limit(mac, up_kbps, down_kbps)
 	return true
 end
 
+-- Set block (kick out) status
+function set_block(mac, blocked)
+	mac = mac:upper()
+	local section = mac_to_section(mac)
+	local b_val = blocked and "1" or "0"
+
+	-- Update UCI
+	local exists = false
+	uci:foreach("cymonline", "device", function(s)
+		if s.mac and s.mac:upper() == mac then
+			exists = true
+			uci:set("cymonline", s[".name"], "blocked", b_val)
+		end
+	end)
+
+	if not exists then
+		uci:section("cymonline", "device", section, {
+			mac = mac,
+			remark = "",
+			limit_up = "0",
+			limit_down = "0",
+			blocked = b_val
+		})
+	end
+
+	uci:commit("cymonline")
+
+	-- Apply nftables rules
+	exec(NETWORK_SCRIPT .. " set_block " .. mac .. " " .. b_val)
+
+	return true
+end
+
 -- Delete device record
 function delete_device(mac)
 	mac = mac:upper()
 
 	-- Remove speed limit first
 	exec(NETWORK_SCRIPT .. " remove_limit " .. mac)
+	
+	-- Remove block rule
+	exec(NETWORK_SCRIPT .. " remove_block " .. mac)
 
 	-- Find and delete UCI section
 	uci:foreach("cymonline", "device", function(s)

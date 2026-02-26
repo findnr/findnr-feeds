@@ -380,47 +380,62 @@ function to_clash(raw_nodes)
 	-- Strategy: Use json to dump, but Clash needs YAML.
 	-- Actually, let's just use strict formatting for the known structure.
 	
-	local out = "port: 7890\nallow-lan: true\nmode: rule\nlog-level: info\nproxies:\n"
+	local out = {
+		"port: 7890",
+		"allow-lan: true",
+		"mode: rule",
+		"log-level: info",
+		"proxies:"
+	}
 	for _, p in ipairs(proxies) do
-		out = out .. "  - name: " .. p.name .. "\n"
-		out = out .. "    type: " .. p.type .. "\n"
-		out = out .. "    server: " .. p.server .. "\n"
-		out = out .. "    port: " .. p.port .. "\n"
-		if p.uuid then out = out .. "    uuid: " .. p.uuid .. "\n" end
-		if p.cipher then out = out .. "    cipher: " .. p.cipher .. "\n" end
-		if p.password then out = out .. "    password: " .. p.password .. "\n" end
-		if p.tls ~= nil then out = out .. "    tls: " .. (p.tls and "true" or "false") .. "\n" end
-		if p.servername then out = out .. "    servername: " .. p.servername .. "\n" end
-		if p.network then out = out .. "    network: " .. p.network .. "\n" end
-		if p.alterId then out = out .. "    alterId: " .. p.alterId .. "\n" end
-		if p.flow then out = out .. "    flow: " .. p.flow .. "\n" end
+		-- Escape double quotes in node name to prevent YAML parsing errors
+		local safe_name = p.name:gsub('"', '\\"')
+		table.insert(out, string.format('  - name: "%s"', safe_name))
+		table.insert(out, "    type: " .. p.type)
+		table.insert(out, "    server: " .. p.server)
+		table.insert(out, "    port: " .. p.port)
+		if p.uuid then table.insert(out, "    uuid: " .. p.uuid) end
+		if p.cipher then table.insert(out, "    cipher: " .. p.cipher) end
+		if p.password then table.insert(out, "    password: " .. p.password) end
+		if p.tls ~= nil then table.insert(out, "    tls: " .. (p.tls and "true" or "false")) end
+		if p.servername then table.insert(out, "    servername: " .. p.servername) end
+		if p.network then table.insert(out, "    network: " .. p.network) end
+		if p.alterId then table.insert(out, "    alterId: " .. p.alterId) end
+		if p.flow then table.insert(out, "    flow: " .. p.flow) end
 		if p["ws-opts"] then
-			out = out .. "    ws-opts:\n"
-			if p["ws-opts"].path then out = out .. "      path: " .. p["ws-opts"].path .. "\n" end
+			table.insert(out, "    ws-opts:")
+			if p["ws-opts"].path then table.insert(out, "      path: " .. p["ws-opts"].path) end
 			if p["ws-opts"].headers and p["ws-opts"].headers.Host then
-				out = out .. "      headers:\n        Host: " .. p["ws-opts"].headers.Host .. "\n"
+				table.insert(out, "      headers:")
+				table.insert(out, "        Host: " .. p["ws-opts"].headers.Host)
 			end
 		end
 		if p["reality-opts"] then
-			out = out .. "    client-fingerprint: " .. (p["client-fingerprint"] or "chrome") .. "\n"
-			out = out .. "    reality-opts:\n"
+			table.insert(out, "    client-fingerprint: " .. (p["client-fingerprint"] or "chrome"))
+			table.insert(out, "    reality-opts:")
 			if p["reality-opts"]["public-key"] then
-				out = out .. "      public-key: " .. p["reality-opts"]["public-key"] .. "\n"
+				table.insert(out, "      public-key: " .. p["reality-opts"]["public-key"])
 			end
 			if p["reality-opts"]["short-id"] then
-				out = out .. "      short-id: " .. p["reality-opts"]["short-id"] .. "\n"
+				table.insert(out, "      short-id: " .. p["reality-opts"]["short-id"])
 			end
 		end
 	end
 	
-	out = out .. "proxy-groups:\n"
-	out = out .. "  - name: PROXIES\n    type: select\n    proxies:\n"
-	for _, n in ipairs(proxy_names) do out = out .. "      - " .. n .. "\n" end
-	out = out .. "  - name: AUTO\n    type: url-test\n    url: http://www.gstatic.com/generate_204\n    interval: 300\n    proxies:\n"
-	for _, n in ipairs(proxy_names) do out = out .. "      - " .. n .. "\n" end
+	table.insert(out, "proxy-groups:")
+	table.insert(out, "  - name: PROXIES\n    type: select\n    proxies:")
+	for _, n in ipairs(proxy_names) do
+		local safe_name = n:gsub('"', '\\"')
+		table.insert(out, string.format('      - "%s"', safe_name))
+	end
+	table.insert(out, "  - name: AUTO\n    type: url-test\n    url: http://www.gstatic.com/generate_204\n    interval: 300\n    proxies:")
+	for _, n in ipairs(proxy_names) do
+		local safe_name = n:gsub('"', '\\"')
+		table.insert(out, string.format('      - "%s"', safe_name))
+	end
 	
-	out = out .. "rules:\n  - MATCH,PROXIES\n"
-	return out
+	table.insert(out, "rules:\n  - MATCH,PROXIES\n")
+	return table.concat(out, "\n")
 end
 
 -- --- to_singbox ---
